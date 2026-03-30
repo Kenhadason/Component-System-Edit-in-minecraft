@@ -20,103 +20,179 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
         super(client, width, height, y, itemHeight);
     }
 
-    // 💡 แก้ไข: ลบ Override Render ที่ไม่ได้ใช้ออก โค้ดจะสั้นและคลีนขึ้น
     public void addNbtEntry(String key, String value, byte nbtType) {
-        NbtEntry entry = new NbtEntry(this.client, key, value, nbtType, this);
-        this.addEntry(entry);
+        this.addEntry(new NbtEntry(this.client, key, value, nbtType, this));
     }
 
-    // 💡 แก้ไข: ต้องใช้ super. ไม่งั้นพอกดลบปุ๊บ เกมจะแครช (Stack Overflow) ทันที!
+    // Fix: super call prevents StackOverflow
     public void removeEntry(NbtEntry entry) {
         super.removeEntry(entry);
     }
 
-    // 💡 แก้ไข: เอาคำว่า abstract ออก
+    // Fix: these belong on the WIDGET, not the entry class
+    @Override
+    public int getRowWidth() {
+        return this.width - 20;
+    }
+
+    protected int getScrollbarPositionX() {
+        return this.width - 8;
+    }
+
+    // ─────────────────────────────────────────────
     public static class NbtEntry extends ElementListWidget.Entry<NbtEntry> {
+
         public final TextFieldWidget keyField;
-        public TextFieldWidget valueField;
-        public final CheckboxWidget checkboxWidget;
+        public final TextFieldWidget valueField;   // null when nbtType == 1 (boolean)
+        public final CheckboxWidget checkboxWidget; // null when not boolean
         public final ButtonWidget deleteButton;
+        private final MinecraftClient client;
+        private final byte nbtType;
 
         public NbtEntry(MinecraftClient client, String key, String value, byte nbtType, NbtListWidget parent) {
+            this.client = client;
+            this.nbtType = nbtType;
 
-            // 🟢 1. ช่อง Key (ฝั่งซ้าย)
-            this.keyField = new TextFieldWidget(client.textRenderer, 0, 0, 100, 20, Text.literal("Key"));
+            // Key field
+            this.keyField = new TextFieldWidget(client.textRenderer, 0, 0, 130, 18, Text.literal("Key"));
             this.keyField.setMaxLength(256);
             this.keyField.setText(key);
-            this.keyField.setEditable(true); // ปลดล็อคให้แก้ไขชื่อ Key ได้แล้ว! 🔓
-            this.valueField = new TextFieldWidget(client.textRenderer, 0, 0, 150, 20, Text.literal("Value"));
-            this.valueField.setMaxLength(256);
-            this.valueField.setText(value);
 
-            // 🟢 2. ปุ่มถังขยะ (สีแดง)
-            this.deleteButton = ButtonWidget.builder(Text.literal("❌").formatted(Formatting.RED), button -> {
-                parent.removeEntry(this);
-            }).dimensions(0, 0, 20, 20).build();
+            // Delete button
+            this.deleteButton = ButtonWidget.builder(
+                    Text.literal("X").formatted(Formatting.RED),
+                    btn -> parent.removeEntry(this)
+            ).dimensions(0, 0, 18, 18).build();
 
-            // 🟢 3. ช่อง Value หรือ Checkbox (ฝั่งขวา)
-            if (nbtType == 1 && (value.equals("true") || value.equals("false") || value.equals("0b") || value.equals("1b"))) {
-                boolean isChecked = value.contains("true") || value.equals("1b");
-                this.checkboxWidget = CheckboxWidget.builder(Text.literal("เปิด/ปิด"), client.textRenderer)
-                        .checked(isChecked).build();
+            // Boolean type → checkbox; everything else → text field
+            boolean isBoolean = nbtType == 1
+                    && (value.equals("true") || value.equals("false")
+                    || value.equals("1b") || value.equals("0b"));
+
+            if (isBoolean) {
+                boolean checked = value.equals("true") || value.equals("1b");
+                this.checkboxWidget = CheckboxWidget.builder(Text.literal(""), client.textRenderer)
+                        .checked(checked).build();
                 this.valueField = null;
             } else {
-                this.valueField = new TextFieldWidget(client.textRenderer, 0, 0, 150, 20, Text.literal("Value"));
-                this.valueField.setMaxLength(999999); // ให้พิมพ์ NBT ยาวๆ ได้
+                this.valueField = new TextFieldWidget(client.textRenderer, 0, 0, 200, 18, Text.literal("Value"));
+                this.valueField.setMaxLength(999999);
                 this.valueField.setText(value);
                 this.checkboxWidget = null;
             }
         }
 
-        public void render(DrawContext context, int index, int y, int x, int entryWidth, int entryHeight, int mouseX, int mouseY, boolean hovered, float tickDelta) {
-            // (ชื่อพารามิเตอร์ด้านบน IDE อาจจะตั้งให้ต่างจากนี้นิดหน่อย ปล่อยมันไว้นะครับ)
+        // ── THE critical fix: this is the correct signature for 1.21.x ──
+        public void render(DrawContext context, int index, int y, int x,
+                           int entryWidth, int entryHeight,
+                           int mouseX, int mouseY, boolean hovered, float tickDelta) {
 
-            // 1. อัปเดตตำแหน่ง
-            this.keyField.setY(y + 2);
-            this.valueField.setY(y + 2);
-            this.deleteButton.setY(y);
+            int midY = y + (entryHeight / 2);
+            int fieldY = midY - 9; // centres an 18px field
 
-            this.keyField.setX(x + 5);
-            this.valueField.setX(x + 115);
-            this.deleteButton.setX(x + entryWidth - 25);
+            // Layout constants
+            int keyX      = x + 4;
+            int tagX      = keyX + 134;  // type badge column
+            int valueX    = tagX + 26;
+            int deleteX   = x + entryWidth - 22;
 
-            // 2. สั่งวาด
+            // Clamp value field so it never overlaps the delete button
+            int maxValW = deleteX - valueX - 4;
+
+            // ── Position and render key field ──
+            this.keyField.setX(keyX);
+            this.keyField.setY(fieldY);
             this.keyField.render(context, mouseX, mouseY, tickDelta);
-            this.valueField.render(context, mouseX, mouseY, tickDelta);
+
+            // ── Type badge ──
+            String tag = getTypeTag();
+            int tagColor = getTypeColor();
+            context.drawTextWithShadow(this.client.textRenderer,
+                    Text.literal(tag).formatted(Formatting.GRAY),
+                    tagX, midY - 4, tagColor);
+
+            // ── Value: checkbox or text field ──
+            if (this.checkboxWidget != null) {
+                this.checkboxWidget.setX(valueX);
+                this.checkboxWidget.setY(fieldY);
+                this.checkboxWidget.render(context, mouseX, mouseY, tickDelta);
+            } else if (this.valueField != null) {
+                this.valueField.setWidth(Math.max(40, maxValW));
+                this.valueField.setX(valueX);
+                this.valueField.setY(fieldY);
+                this.valueField.render(context, mouseX, mouseY, tickDelta);
+            }
+
+            // ── Delete button ──
+            this.deleteButton.setX(deleteX);
+            this.deleteButton.setY(y + (entryHeight / 2) - 9);
             this.deleteButton.render(context, mouseX, mouseY, tickDelta);
+
+            // ── Hover highlight ──
+            if (hovered) {
+                context.fill(x, y, x + entryWidth, y + entryHeight, 0x18FFFFFF);
+            }
         }
 
+        // ── Fix: null-safe element list ──
         @Override
         public List<? extends Element> children() {
-            List<Element> elements = new ArrayList<>();
-            elements.add(this.keyField);
-            if (this.checkboxWidget != null) elements.add(this.checkboxWidget);
-            if (this.valueField != null) elements.add(this.valueField);
-            elements.add(this.deleteButton);
-            return List.of(this.keyField, this.valueField, this.deleteButton);
+            List<Element> list = new ArrayList<>();
+            list.add(this.keyField);
+            if (this.checkboxWidget != null) list.add(this.checkboxWidget);
+            if (this.valueField != null)    list.add(this.valueField);
+            list.add(this.deleteButton);
+            return list;
         }
 
+        // ── Fix: null-safe selectable list ──
         @Override
         public List<? extends Selectable> selectableChildren() {
-            List<Selectable> elements = new ArrayList<>();
-            elements.add(this.keyField);
-            if (this.checkboxWidget != null) elements.add(this.checkboxWidget);
-            if (this.valueField != null) elements.add(this.valueField);
-            elements.add(this.deleteButton);
-            return List.of(this.keyField, this.valueField, this.deleteButton);
+            List<Selectable> list = new ArrayList<>();
+            list.add(this.keyField);
+            if (this.checkboxWidget != null) list.add(this.checkboxWidget);
+            if (this.valueField != null)     list.add(this.valueField);
+            list.add(this.deleteButton);
+            return list;
+        }
+
+        // Human-readable NBT type tag
+        private String getTypeTag() {
+            if (this.checkboxWidget != null) return "[B]"; // byte/boolean
+            if (this.valueField == null) return "[?]";
+            String v = this.valueField.getText().trim();
+            if (v.endsWith("b") || v.endsWith("B")) return "[b]";
+            if (v.endsWith("s") || v.endsWith("S")) return "[s]";
+            if (v.endsWith("l") || v.endsWith("L")) return "[l]";
+            if (v.endsWith("f") || v.endsWith("F")) return "[f]";
+            if (v.endsWith("d") || v.endsWith("D")) return "[d]";
+            if (v.startsWith("[I;"))                return "[I]";
+            if (v.startsWith("[L;"))                return "[L]";
+            if (v.startsWith("[B;"))                return "[B]";
+            if (v.startsWith("{"))                  return "[{}]";
+            if (v.startsWith("["))                  return "[[]]";
+            try { Integer.parseInt(v);  return "[i]"; } catch (NumberFormatException ignored) {}
+            try { Double.parseDouble(v); return "[d]"; } catch (NumberFormatException ignored) {}
+            return "[s]";
+        }
+
+        private int getTypeColor() {
+            String tag = getTypeTag();
+            return switch (tag) {
+                case "[B]", "[b]" -> 0xFF9944; // orange — byte/bool
+                case "[i]"        -> 0x55AAFF; // blue   — int
+                case "[l]"        -> 0xAA55FF; // purple — long
+                case "[f]", "[d]" -> 0x55FF99; // green  — float/double
+                case "[s]"        -> 0xFFFFAA; // yellow — string
+                case "[{}]"       -> 0xFF5555; // red    — compound
+                case "[[]]","[I]","[L]" -> 0xFF55FF; // pink — arrays
+                default           -> 0xAAAAAA;
+            };
         }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, boolean hovered, float deltaTicks) {
 
-        }
-        // 💡 เพิ่ม 2 เมธอดนี้เพื่อบังคับให้ List กว้างเต็มจอ และย้าย Scrollbar ไปขวาสุด
-
-        public int getRowWidth() {
-            return this.getWidth() - 40; // ขยายความกว้างให้เกือบเต็มหน้าจอ
-        }
-        protected int getScrollbarPositionX() {
-            return this.getWidth() - 10; // ย้ายแทบเลื่อน (Scrollbar) ไปชิดขอบขวาสุด
         }
     }
 }

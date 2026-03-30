@@ -1,42 +1,41 @@
 {
-	"schemaVersion": 1,
-	"id": "tutorialmod",
-	"version": "${version}",
-	"name": "Tutorial Mod",
-	"description": "This is an example description! Tell everyone what your mod is about!",
-	"authors": [
-		"Me!"
-	],
-	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
-	},
-	"license": "MIT",
-	"icon": "assets/tutorialmod/icon.png",
-	"environment": "*",
-	"entrypoints": {
-		"main": [
-			"net.dive.tutorialmod.TutorialMod"
-		],
-		"client": [
-			"net.dive.tutorialmod.TutorialModClient"
-		]
-	},
-		"fabric-datagen": [
-			"net.dive.tutorialmod.TutorialModDataGenerator"
-		]
-	},
-	"mixins": [
-		"tutorialmod.mixins.json",
-		{
-			"config": "tutorialmod.client.mixins.json",
-			"environment": "client"
-		}
-	],
-	"depends": {
-		"fabricloader": ">=0.18.4",
-		"minecraft": "~1.21.11",
-		"java": ">=21",
-		"fabric-api": "*"
-	}
+  "schemaVersion": 1,
+  "id": "tutorialmod",
+  "version": "${version}",
+  "name": "Tutorial Mod",
+  "description": "NBT Editor Wand for Minecraft 1.21",
+  "authors": [
+    "Me!"
+  ],
+  "contact": {
+    "homepage": "https://fabricmc.net/",
+    "sources": "https://github.com/FabricMC/fabric-example-mod"
+  },
+  "license": "MIT",
+  "icon": "assets/tutorialmod/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "net.dive.tutorialmod.TutorialMod"
+    ],
+    "client": [
+      "net.dive.tutorialmod.TutorialModClient"
+    ],
+    "fabric-datagen": [
+      "net.dive.tutorialmod.TutorialModDataGenerator"
+    ]
+  },
+  "mixins": [
+    "tutorial-mod.mixins.json",
+    {
+      "config": "tutorial-mod.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
 }
