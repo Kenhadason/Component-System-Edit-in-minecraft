@@ -1,5 +1,6 @@
 package net.dive.tutorialmod.screen;
 
+import net.minecraft.client.input.KeyInput;
 import net.dive.tutorialmod.network.SaveNbtPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
@@ -12,7 +13,10 @@ import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 
+import java.security.Key;
 import java.util.List;
+
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
 
 public class NbtEditorScreen extends Screen {
 
@@ -269,12 +273,11 @@ public class NbtEditorScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
     }
 
-    public boolean keyPressed(int keyCode) {
-        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
+    public boolean keyPressed(KeyInput keyInput) {
+        if (keyInput.getKeycode() == GLFW_KEY_ESCAPE) {
             this.close();
             return true;
         }
-
-        return super.keyPressed(keyCode);
+        return super.keyPressed(keyInput);
     }
 }
