@@ -9,6 +9,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
@@ -33,12 +34,22 @@ public class NbtWandItem extends Item {
         if (!(context.getPlayer() instanceof ServerPlayerEntity serverPlayer)) return ActionResult.FAIL;
 
         // Permission check
-        if (!serverPlayer.hasPermissionLevel(2)) {
+        ServerCommandSource source = serverPlayer.getCommandSource();
+
+        if (!source.getPermissions().hasPermission(null)) {
             serverPlayer.sendMessage(
                     Text.literal("You need operator permission to use the NBT Wand.")
-                            .formatted(Formatting.RED), true);
+                            .formatted(Formatting.RED),
+                    false
+            );
             return ActionResult.FAIL;
         }
+
+
+
+
+
+
 
         BlockPos pos = context.getBlockPos();
         BlockEntity blockEntity = world.getBlockEntity(pos);
@@ -76,7 +87,8 @@ public class NbtWandItem extends Item {
         if (!(user instanceof ServerPlayerEntity serverPlayer)) return ActionResult.FAIL;
 
         // Permission check
-        if (!serverPlayer.hasPermissionLevel(2)) {
+        ServerCommandSource source = serverPlayer.getCommandSource();
+        if (!source.getPermissions().hasPermission(null)) {
             serverPlayer.sendMessage(
                     Text.literal("You need operator permission to use the NBT Wand.")
                             .formatted(Formatting.RED), true);
