@@ -14,6 +14,7 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.predicate.NbtPredicate;
 import net.minecraft.registry.*;
+import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.*;
@@ -54,7 +55,8 @@ public class TutorialMod implements ModInitializer {
             if (!(player instanceof ServerPlayerEntity serverPlayer)) return ActionResult.PASS;
 
             // Permission check — op level 2 required
-            if (!serverPlayer.hasPermissionLevel(2)) {
+            ServerCommandSource source = serverPlayer.getCommandSource();
+            if (!source.getPermissions().hasPermission(null)) {
                 serverPlayer.sendMessage(
                         Text.literal("You need operator permission to use the NBT Wand.")
                                 .formatted(Formatting.RED), true);
@@ -74,7 +76,8 @@ public class TutorialMod implements ModInitializer {
                     if (player == null) return;
 
                     // Permission check on every save, not just open
-                    if (!player.hasPermissionLevel(2)) {
+                    ServerCommandSource source = player.getCommandSource();
+                    if (!source.getPermissions().hasPermission(null)) {
                         player.sendMessage(
                                 Text.literal("You need operator permission to save NBT.")
                                         .formatted(Formatting.RED), false);
@@ -85,9 +88,9 @@ public class TutorialMod implements ModInitializer {
                         switch (payload.editType()) {
                             case "item" -> handleItemSave(payload, player);
                             case "block" -> handleBlockSave(payload, player, context.server()
-                                    .getCommandSource().withSilent().withLevel(4));
+                                    .getCommandSource().withSilent());
                             case "entity" -> handleEntitySave(payload, player, context.server()
-                                    .getCommandSource().withSilent().withLevel(4));
+                                    .getCommandSource().withSilent());
                             default -> player.sendMessage(
                                     Text.literal("Unknown edit type: " + payload.editType())
                                             .formatted(Formatting.RED), false);
