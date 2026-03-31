@@ -74,6 +74,7 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
         public final ButtonWidget    deleteButton;
         public       String          category = "Other";
         public       boolean         expanded = false;
+        public       Runnable        onDelete = null;
 
         private final MinecraftClient client;
         private final byte            nbtType;
@@ -96,7 +97,10 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
 
             this.deleteButton = ButtonWidget.builder(
                     Text.literal("✕").formatted(Formatting.RED),
-                    btn -> parent.removeEntry(this)
+                    btn -> {
+                        if (onDelete != null) onDelete.run();
+                        else parent.removeEntry(this);
+                    }
             ).dimensions(0, 0, 16, 16).build();
 
             boolean isBool = (nbtType == NbtElement.BYTE_TYPE)

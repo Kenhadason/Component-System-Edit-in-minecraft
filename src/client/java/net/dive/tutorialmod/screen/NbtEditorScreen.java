@@ -279,6 +279,7 @@ public class NbtEditorScreen extends Screen {
                         new NbtListWidget.NbtEntry(this.client, key, raw, type, listWidget);
                 entry.category = cat;
                 masterEntries.add(entry);
+                entry.onDelete = () -> { masterEntries.remove(entry); applyFilter(); };
 
                 if (!categories.contains(cat)) categories.add(cat);
                 loaded++;
@@ -357,6 +358,7 @@ public class NbtEditorScreen extends Screen {
                 new NbtListWidget.NbtEntry(this.client, key, val, type, listWidget);
         entry.category = cat;
         masterEntries.add(entry);
+        entry.onDelete = () -> { masterEntries.remove(entry); applyFilter(); };
 
         if (!categories.contains(cat)) {
             categories.add(cat);
