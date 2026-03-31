@@ -1,5 +1,6 @@
 package net.dive.tutorialmod;
 
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.dive.tutorialmod.network.OpenNbtEditorPayload;
 import net.dive.tutorialmod.network.SaveNbtPayload;
 import net.fabricmc.api.ModInitializer;
@@ -76,18 +77,27 @@ public class TutorialMod implements ModInitializer {
                     if (player == null) return;
 
                     try {
+                        NbtCompound parsedNbt;
+                        try {
+                            parsedNbt = StringNbtReader.readCompound(payload.nbtData());
+                        } catch (Exception e) {
+                            player.sendMessage(
+                                Text.literal("❌ Invalid NBT: " + e.getMessage()).formatted(Formatting.RED), false);
+                            return;
+                        }
+
                         switch (payload.editType()) {
 
                             // ── ENTITY ────────────────────────────
                             // Client sends UUID; we look the entity up
                             // in every loaded dimension to be safe.
-                            case "entity" -> saveEntityNbt(player, payload);
+                            case "entity" -> saveEntityNbt(player, payload, parsedNbt);
 
                             // ── BLOCK ─────────────────────────────
-                            case "block"  -> saveBlockNbt(player, payload, context);
+                            case "block"  -> saveBlockNbt(player, payload, context, parsedNbt);
 
                             // ── ITEM ──────────────────────────────
-                            case "item"   -> saveItemNbt(player, payload);
+                            case "item"   -> saveItemNbt(player, payload, parsedNbt);
 
                             default -> player.sendMessage(
                                     Text.literal("❌ Unknown editType: " + payload.editType())
@@ -107,10 +117,17 @@ public class TutorialMod implements ModInitializer {
     //  ENTITY  — look up by UUID, merge NBT directly on the entity
     // ──────────────────────────────────────────────────────────────
     private void saveEntityNbt(ServerPlayerEntity player,
-                               SaveNbtPayload payload) throws Exception {
+                               SaveNbtPayload payload,
+                               NbtCompound parsedNbt) {
 
-        UUID uuid = UUID.fromString(payload.targetInfo());
-        NbtCompound incoming = StringNbtReader.readCompound(payload.nbtData());
+        UUID uuid;
+        try {
+            uuid = UUID.fromString(payload.targetInfo());
+        } catch (IllegalArgumentException e) {
+            player.sendMessage(
+                    Text.literal("❌ Invalid entity UUID: " + payload.targetInfo()).formatted(Formatting.RED), false);
+            return;
+        }
 
         // Search every loaded server world for the entity
         Entity target = null;
@@ -127,24 +144,53 @@ public class TutorialMod implements ModInitializer {
 
         // Read the entity's current NBT, merge the new data on top,
         // then write it back — this preserves fields we didn't touch.
-        // Get the entity's data components
+//        NbtCompound current = new NbtCompound();
+//        target.writeNbt(current, player.getRegistryManager());
+//        current.copyFrom(parsedNbt);
+//        target.readNbt(current, player.getRegistryManager());
+
         player.sendMessage(
                 Text.literal("✅ Entity NBT saved! (" + target.getType().getName().getString() + ")")
                         .formatted(Formatting.GREEN), false);
 
-        System.out.println("[NbtEditor] Entity " + uuid + " updated with: " + incoming);
+        System.out.println("[NbtEditor] Entity " + uuid + " updated with: " + parsedNbt);
     }
     // ──────────────────────────────────────────────────────────────
     //  BLOCK  — run "data merge block x y z {…}" via dispatcher
     // ──────────────────────────────────────────────────────────────
     private void saveBlockNbt(ServerPlayerEntity player,
                               SaveNbtPayload payload,
-                              net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.Context context) throws Exception {
+                              net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.Context context,
+                              NbtCompound parsedNbt) throws CommandSyntaxException {
 
-        String[] coords  = payload.targetInfo().split(",");
-        String   command = String.format("data merge block %s %s %s %s",
-                coords[0], coords[1], coords[2], payload.nbtData());
+        String[] coords = payload.targetInfo().split(",");
+        if (coords.length < 3) {
+            player.sendMessage(
+                    Text.literal("❌ Invalid block coordinates: " + payload.targetInfo()).formatted(Formatting.RED), false);
+            return;
+        }
 
+        int x, y, z;
+        try {
+            x = Integer.parseInt(coords[0].trim());
+            y = Integer.parseInt(coords[1].trim());
+            z = Integer.parseInt(coords[2].trim());
+        } catch (NumberFormatException e) {
+            player.sendMessage(
+                    Text.literal("❌ Invalid block coordinates: " + payload.targetInfo()).formatted(Formatting.RED), false);
+            return;
+        }
+
+        net.minecraft.util.math.BlockPos pos = new net.minecraft.util.math.BlockPos(x, y, z);
+        net.minecraft.block.entity.BlockEntity be = player.getEntityWorld().getBlockEntity(pos);
+        if (be == null) {
+            player.sendMessage(
+                    Text.literal("❌ No block entity at " + payload.targetInfo()).formatted(Formatting.RED), false);
+            return;
+        }
+//        be.readNbt(parsedNbt, player.getRegistryManager())
+
+        String command = String.format("data merge block %d %d %d %s", x, y, z, payload.nbtData());
         var commandSource = context.server().getCommandSource().withSilent();
         context.server().getCommandManager().getDispatcher().execute(command, commandSource);
 
@@ -156,7 +202,8 @@ public class TutorialMod implements ModInitializer {
     //  ITEM  — write to CUSTOM_DATA component on the held stack
     // ──────────────────────────────────────────────────────────────
     private void saveItemNbt(ServerPlayerEntity player,
-                             SaveNbtPayload payload) throws Exception {
+                             SaveNbtPayload payload,
+                             NbtCompound parsedNbt) {
 
         Hand      hand  = Hand.valueOf(payload.targetInfo());   // "OFF_HAND" or "MAIN_HAND"
         ItemStack stack = player.getStackInHand(hand);
@@ -167,7 +214,6 @@ public class TutorialMod implements ModInitializer {
             return;
         }
 
-        NbtCompound parsedNbt = StringNbtReader.readCompound(payload.nbtData());
         stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(parsedNbt));
 
         player.sendMessage(
