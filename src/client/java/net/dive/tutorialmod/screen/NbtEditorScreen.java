@@ -11,9 +11,11 @@ import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+
 import java.util.ArrayList;
 import java.util.List;
-public class NbtEditorScreen extends Screen{
+
+public class NbtEditorScreen extends Screen {
 
     // ── Incoming ──────────────────────────────────────────────────
     private final String editType;
@@ -38,7 +40,6 @@ public class NbtEditorScreen extends Screen{
     private static final String[] TYPE_CYCLE =
             {"String", "Int", "Float", "Long", "Boolean", "Compound", "List"};
 
-    // Master list — survives filter rebuilds
     private final List<NbtListWidget.NbtEntry> masterEntries = new ArrayList<>();
     private final List<String>                 categories    = new ArrayList<>();
 
@@ -49,15 +50,15 @@ public class NbtEditorScreen extends Screen{
     private static final int ROW_H     = 22;
 
     // ── Colours ───────────────────────────────────────────────────
-    private static final int C_PANEL      = 0xE0101010;
-    private static final int C_SIDEBAR    = 0xE0181818;
-    private static final int C_DIVIDER    = 0x44FFFFFF;
-    private static final int C_BLOCK_BG   = 0xFF1A3A5C;
-    private static final int C_ITEM_BG    = 0xFF1A3D1A;
-    private static final int C_ENTITY_BG  = 0xFF4A2E00;
-    private static final int C_BLOCK_TX   = 0xFF74C0FC;
-    private static final int C_ITEM_TX    = 0xFF8CE88C;
-    private static final int C_ENTITY_TX  = 0xFFFFBB55;
+    private static final int C_PANEL     = 0xE0101010;
+    private static final int C_SIDEBAR   = 0xE0181818;
+    private static final int C_DIVIDER   = 0x44FFFFFF;
+    private static final int C_BLOCK_BG  = 0xFF1A3A5C;
+    private static final int C_ITEM_BG   = 0xFF1A3D1A;
+    private static final int C_ENTITY_BG = 0xFF4A2E00;
+    private static final int C_BLOCK_TX  = 0xFF74C0FC;
+    private static final int C_ITEM_TX   = 0xFF8CE88C;
+    private static final int C_ENTITY_TX = 0xFFFFBB55;
 
     public NbtEditorScreen(String editType, String targetInfo, String initialNbt) {
         super(Text.literal("NBT Editor"));
@@ -66,9 +67,6 @@ public class NbtEditorScreen extends Screen{
         this.initialNbt = initialNbt;
     }
 
-    // ─────────────────────────────────────────────────────────────
-    //  shouldPause — keep game paused while editor is open
-    // ─────────────────────────────────────────────────────────────
     @Override
     public boolean shouldPause() { return true; }
 
@@ -79,21 +77,17 @@ public class NbtEditorScreen extends Screen{
     protected void init() {
         super.init();
 
-        int listLeft   = SIDEBAR_W + 1;          // start after sidebar divider
+        int listLeft   = SIDEBAR_W + 1;
         int listTop    = HEADER_H + 1;
-        int listBottom = this.height - FOOTER_H; // pixel-row where footer starts
+        int listBottom = this.height - FOOTER_H;
         int listW      = this.width - listLeft;
 
-        // ── Scrollable NBT list ───────────────────────────────────
-        // FIX: pass x offset so the widget knows where it lives;
-        //      ElementListWidget in 1.21 uses setX() to position itself.
         this.listWidget = new NbtListWidget(
                 this.client, listW, listBottom, listTop, ROW_H, listLeft);
 
-        parseAndPopulate();            // fills masterEntries + categories
+        parseAndPopulate();
         addDrawableChild(this.listWidget);
 
-        // ── Category sidebar tabs ─────────────────────────────────
         rebuildCategoryButtons();
 
         // ── Footer row 1: Search ──────────────────────────────────
@@ -121,7 +115,6 @@ public class NbtEditorScreen extends Screen{
         this.newValueField.setPlaceholder(Text.literal("value").formatted(Formatting.DARK_GRAY));
         addDrawableChild(this.newValueField);
 
-        // Type cycler
         this.newTypeButton = ButtonWidget.builder(
                 Text.literal("[" + TYPE_CYCLE[typeCycleIdx] + "]"),
                 btn -> {
@@ -138,32 +131,27 @@ public class NbtEditorScreen extends Screen{
         // ── Footer row 3: action buttons ─────────────────────────
         int fY3 = this.height - FOOTER_H + 48;
 
-        // Expand All
         addDrawableChild(ButtonWidget.builder(
                 Text.literal("▼ All"),
                 btn -> { masterEntries.forEach(e -> e.expanded = true); applyFilter(); }
         ).dimensions(listLeft, fY3, 52, 16).build());
 
-        // Collapse All
         addDrawableChild(ButtonWidget.builder(
                 Text.literal("▶ All"),
                 btn -> { masterEntries.forEach(e -> e.expanded = false); applyFilter(); }
         ).dimensions(listLeft + 56, fY3, 52, 16).build());
 
-        // Clear All
         addDrawableChild(ButtonWidget.builder(
                 Text.literal("Clear").formatted(Formatting.RED),
                 btn -> { masterEntries.clear(); applyFilter();
                     setStatus("Cleared.", 0xFFAA00); }
         ).dimensions(listLeft + 112, fY3, 52, 16).build());
 
-        // Save
         addDrawableChild(ButtonWidget.builder(
                 Text.literal("Save").formatted(Formatting.GREEN),
                 btn -> saveNbt()
         ).dimensions(this.width - 170, fY3, 78, 16).build());
 
-        // Cancel
         addDrawableChild(ButtonWidget.builder(
                 Text.literal("Cancel").formatted(Formatting.RED),
                 btn -> this.close()
@@ -173,27 +161,27 @@ public class NbtEditorScreen extends Screen{
     // ─────────────────────────────────────────────────────────────
     //  Render
     //
-    //  FIX: The IllegalStateException "Can only blur once per frame"
-    //  is caused by calling renderBackground() inside our render()
-    //  method BEFORE super.render().  In Minecraft 1.21, Screen's
-    //  super.render() already calls renderBackground() internally
-    //  when needed.  If we call it again manually we trigger two
-    //  blur passes in the same frame → crash.
+    //  FIX: render order was wrong in the original.
+    //
+    //  In MC 1.21, Screen.super.render() fires the background blur
+    //  pass internally. If you call renderBackground() manually
+    //  before OR after super.render() you get two blur passes in
+    //  the same frame → IllegalStateException "Can only blur once
+    //  per frame" → crash.
     //
     //  Correct order:
-    //    1. super.render()  ← lets Minecraft handle background/blur once
-    //    2. Draw our custom panels on top (they're just ctx.fill() calls,
-    //       not blur passes, so they're safe to call after)
-    //    3. Do NOT call renderBackground() ourselves anywhere.
+    //   1. Draw opaque background panels FIRST (ctx.fill — no blur)
+    //   2. Call super.render() — this is the ONE place blur fires,
+    //      and it also renders all child widgets on top
+    //   3. Draw any text/overlays that must sit above child widgets
+    //
+    //  Never call renderBackground() manually anywhere.
     // ─────────────────────────────────────────────────────────────
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
-        // ── STEP 1: Let super handle background + all child widgets ─
-        // This is the only place the background blur is allowed to fire.
-        super.render(ctx, mx, my, delta);
 
-        // ── STEP 2: Draw our opaque overlay panels on top ──────────
-        // Header bar
+        // ── STEP 1: Draw opaque panels (no blur, safe before super) ─
+        // Header
         ctx.fill(0, 0, this.width, HEADER_H, C_PANEL);
         ctx.fill(0, HEADER_H, this.width, HEADER_H + 1, C_DIVIDER);
 
@@ -202,25 +190,24 @@ public class NbtEditorScreen extends Screen{
         ctx.fill(SIDEBAR_W, HEADER_H + 1, SIDEBAR_W + 1,
                 this.height - FOOTER_H, C_DIVIDER);
 
-        // Footer bar
+        // Footer
         int fTop = this.height - FOOTER_H;
         ctx.fill(0, fTop, this.width, this.height, C_PANEL);
         ctx.fill(0, fTop, this.width, fTop + 1, C_DIVIDER);
 
-        // ── STEP 3: Draw text on top of panels ─────────────────────
-        // Title
+        // ── STEP 2: super.render() — fires blur ONCE, renders children ─
+        super.render(ctx, mx, my, delta);
+
+        // ── STEP 3: Text drawn above child widgets ─────────────────
         ctx.drawCenteredTextWithShadow(
                 textRenderer, Text.literal("NBT Editor"), this.width / 2, 8, 0xFFFFFF);
 
-        // Target badge
         drawTargetBadge(ctx, this.width / 2 - 70, 22);
 
-        // Entry counter
         ctx.drawTextWithShadow(textRenderer,
                 Text.literal(entryCount + " entries").formatted(Formatting.GRAY),
                 this.width - 72, 8, 0xAAAAAA);
 
-        // Column headers (just above the list)
         int hdrY = HEADER_H - 13;
         ctx.drawTextWithShadow(textRenderer,
                 Text.literal("Key").formatted(Formatting.YELLOW),
@@ -232,12 +219,10 @@ public class NbtEditorScreen extends Screen{
                 Text.literal("Value").formatted(Formatting.YELLOW),
                 SIDEBAR_W + 210, hdrY, 0xFFFFFF);
 
-        // Sidebar label
         ctx.drawTextWithShadow(textRenderer,
                 Text.literal("Filter").formatted(Formatting.GRAY),
                 4, HEADER_H + 5, 0x777777);
 
-        // Footer labels
         int listLeft = SIDEBAR_W + 1;
         ctx.drawTextWithShadow(textRenderer,
                 Text.literal("Search:").formatted(Formatting.GRAY),
@@ -253,16 +238,16 @@ public class NbtEditorScreen extends Screen{
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Target badge (coloured pill in the header)
+    //  Target badge
     // ─────────────────────────────────────────────────────────────
     private void drawTargetBadge(DrawContext ctx, int x, int y) {
         int    bg, fg;
         String label;
         switch (editType) {
             case "block"  -> { bg = C_BLOCK_BG;  fg = C_BLOCK_TX;
-                label = "Block  " + shortTarget(); }
+                label = "Block  "  + shortTarget(); }
             case "item"   -> { bg = C_ITEM_BG;   fg = C_ITEM_TX;
-                label = "Item  "  + shortTarget(); }
+                label = "Item  "   + shortTarget(); }
             default       -> { bg = C_ENTITY_BG; fg = C_ENTITY_TX;
                 label = "Entity  " + shortTarget(); }
         }
@@ -272,7 +257,7 @@ public class NbtEditorScreen extends Screen{
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Parse NBT and populate master list + category list
+    //  Parse NBT → master list + categories
     // ─────────────────────────────────────────────────────────────
     private void parseAndPopulate() {
         masterEntries.clear();
@@ -310,7 +295,7 @@ public class NbtEditorScreen extends Screen{
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Category sidebar — rebuild buttons whenever category list changes
+    //  Category sidebar
     // ─────────────────────────────────────────────────────────────
     private void rebuildCategoryButtons() {
         categoryButtons.forEach(this::remove);
@@ -318,14 +303,13 @@ public class NbtEditorScreen extends Screen{
 
         int tabY = HEADER_H + 18;
         for (int i = 0; i < categories.size(); i++) {
-            final String cat = categories.get(i);
-            String label = cat.length() > 9 ? cat.substring(0, 8) + "…" : cat;
+            final String cat   = categories.get(i);
+            String       label = cat.length() > 9 ? cat.substring(0, 8) + "…" : cat;
             ButtonWidget btn = ButtonWidget.builder(Text.literal(label), b -> {
                 activeCategory = cat;
                 applyFilter();
                 rebuildCategoryButtons();
             }).dimensions(2, tabY + i * 19, SIDEBAR_W - 4, 17).build();
-            // Visually distinguish active tab
             btn.active = !cat.equals(activeCategory);
             addDrawableChild(btn);
             categoryButtons.add(btn);
@@ -333,13 +317,21 @@ public class NbtEditorScreen extends Screen{
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Filter: apply active category + search query to list widget
+    //  Filter
+    //
+    //  FIX: the original called listWidget.children().clear() which
+    //  mutates ElementListWidget's internal list directly and causes
+    //  ConcurrentModificationException when called during iteration
+    //  (e.g. from the search field's change listener mid-render).
+    //  Use the safe clearEntries() method instead.
     // ─────────────────────────────────────────────────────────────
     private void applyFilter() {
         String q = (searchField != null)
                 ? searchField.getText().toLowerCase().trim() : "";
 
-        listWidget.children().clear();
+        // FIX: safe clear via the public helper, not children().clear()
+        listWidget.clearEntries();
+
         for (NbtListWidget.NbtEntry e : masterEntries) {
             boolean catOk = activeCategory.equals("All")
                     || e.category.equals(activeCategory);
@@ -351,7 +343,7 @@ public class NbtEditorScreen extends Screen{
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Add new entry from footer bar
+    //  Add new entry
     // ─────────────────────────────────────────────────────────────
     private void addNewEntry() {
         String key = newKeyField.getText().trim();
@@ -380,7 +372,7 @@ public class NbtEditorScreen extends Screen{
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Build NbtCompound from all master entries, send to server
+    //  Save → send to server
     // ─────────────────────────────────────────────────────────────
     private void saveNbt() {
         try {
@@ -390,18 +382,15 @@ public class NbtEditorScreen extends Screen{
                 if (key.isEmpty()) continue;
 
                 if (entry.checkboxWidget != null) {
-                    // Boolean / byte
                     out.putBoolean(key, entry.checkboxWidget.isChecked());
                 } else if (entry.valueField != null) {
-                    String raw    = entry.valueField.getText().trim();
+                    String  raw   = entry.valueField.getText().trim();
                     boolean saved = false;
-                    // Try smart NBT parse first (handles 1b, 2L, 3.14f, {…}, […])
                     try {
                         NbtCompound tmp = StringNbtReader.readCompound("{__v:" + raw + "}");
                         NbtElement  el  = tmp.get("__v");
                         if (el != null) { out.put(key, el); saved = true; }
                     } catch (Exception ignored) {}
-                    // Fall back to plain string
                     if (!saved) out.putString(key, raw);
                 }
             }
@@ -412,7 +401,7 @@ public class NbtEditorScreen extends Screen{
         } catch (Exception e) {
             setStatus("Save error: " + e.getMessage(), 0xFF5555);
             System.err.println("[NbtEditor] Save error: " + e.getMessage());
-            return; // don't close on error so the user can see the message
+            return;
         }
         this.close();
     }
@@ -431,7 +420,6 @@ public class NbtEditorScreen extends Screen{
         statusColor   = color;
     }
 
-    /** Strip surrounding quotes from NBT string values for display. */
     private static String rawValueOf(NbtElement el) {
         String raw = el.toString();
         if (el.getType() == NbtElement.STRING_TYPE
@@ -443,7 +431,6 @@ public class NbtEditorScreen extends Screen{
         return raw;
     }
 
-    /** Map a key+type to a human category name for the sidebar tabs. */
     private static String categoryOf(String key, byte type) {
         String k = key.toLowerCase();
 
@@ -509,7 +496,7 @@ public class NbtEditorScreen extends Screen{
             case "Double"   -> NbtElement.DOUBLE_TYPE;
             case "List"     -> NbtElement.LIST_TYPE;
             case "Compound" -> NbtElement.COMPOUND_TYPE;
-            default         -> NbtElement.STRING_TYPE;  // "String"
+            default         -> NbtElement.STRING_TYPE;
         };
     }
 }
