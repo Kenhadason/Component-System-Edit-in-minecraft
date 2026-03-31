@@ -29,8 +29,7 @@ import net.minecraft.util.Identifier;
 
 import java.util.UUID;
 
-import static net.fabricmc.fabric.impl.resource.PackSourceTracker.getSource;
-
+@SuppressWarnings("ALL")
 public class TutorialMod implements ModInitializer {
 
     public static final RegistryKey<Item> NBT_WAND_KEY =
