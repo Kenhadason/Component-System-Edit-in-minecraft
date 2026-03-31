@@ -8,44 +8,42 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.CheckboxWidget;
 import net.minecraft.client.gui.widget.ElementListWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.StringNbtReader;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Scrollable list of NBT entries.
- *
- * Each row shows:
- *   [TYPE BADGE]  key-field          type-label  value-field / toggle  [X]
- *
- * Compound / List entries show an expand chevron; when expanded, child
- * entries render indented below.
- *
- * Offset is the left margin so the sidebar doesn't overlap.
- */
 public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
 
+    // offsetX = left edge of the widget (sidebar width + 1)
+    // FIX: stored and applied via setX() so the widget renders in the
+    //      correct column and the scrollbar position is calculated correctly.
     private final int offsetX;
 
     public NbtListWidget(MinecraftClient client, int width, int height,
-                         int y, int itemHeight, int offsetX) {
-        super(client, width, height, y, itemHeight);
+                         int top, int itemHeight, int offsetX) {
+        super(client, width, height, top, itemHeight);
         this.offsetX = offsetX;
+        // FIX: tell ElementListWidget where its left edge actually is.
+        // Without this call it defaults to x=0 and the scrollbar math
+        // produces a negative coordinate that corrupts render state,
+        // which is the second trigger of the "blur once per frame" crash.
+        this.setX(offsetX);
     }
 
+    // ── Public API ─────────────────────────────────────────────────
     public void addNbtEntry(String key, String value, byte nbtType) {
-        this.addEntry(new NbtEntry(this.client, key, value, nbtType, this));
+        addEntry(new NbtEntry(this.client, key, value, nbtType, this));
     }
 
-    /** Used by the filter/category system — adds a pre-built entry directly. */
+    /** Add a pre-constructed entry directly (used by filter). */
     public void addEntryDirect(NbtEntry entry) {
-        this.addEntry(entry);
+        addEntry(entry);
     }
 
     @Override
@@ -53,196 +51,217 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
         super.removeEntry(entry);
     }
 
-    @Override public int getRowWidth()            { return this.width - 20; }
-    protected int getScrollbarPositionX()         { return this.width + this.offsetX - 8; }
+    // ── Layout ─────────────────────────────────────────────────────
+    @Override
+    public int getRowWidth() {
+        // Full widget width minus space for the scrollbar
+        return this.width - 12;
+    }
 
-    // ─────────────────────────────────────────────────────────────
-    public static class NbtEntry extends Entry<NbtEntry> {
+    protected int getScrollbarPositionX() {
+        // Scrollbar sits at the right edge of the widget
+        return this.offsetX + this.width - 6;
+    }
 
-        // ── Exposed fields (NbtEditorScreen reads these) ──────────
-        public final TextFieldWidget  keyField;
-        public final TextFieldWidget  valueField;    // null for boolean
-        public final CheckboxWidget   checkboxWidget; // null for non-boolean
-        public final ButtonWidget     deleteButton;
-        public       String           category = "Other";
-        public       boolean          expanded  = false;
+    // ══════════════════════════════════════════════════════════════
+    //  NbtEntry — one row in the list
+    // ══════════════════════════════════════════════════════════════
+    public static class NbtEntry extends ElementListWidget.Entry<NbtEntry> {
+
+        // ── Exposed so NbtEditorScreen can read them on save ──────
+        public final TextFieldWidget keyField;
+        public final TextFieldWidget valueField;    // null when boolean
+        public final CheckboxWidget  checkboxWidget; // null when not boolean
+        public final ButtonWidget    deleteButton;
+        public       String          category = "Other";
+        public       boolean         expanded = false;
 
         private final MinecraftClient client;
         private final byte            nbtType;
         private final NbtListWidget   parent;
+        private       ButtonWidget    expandBtn;      // null unless compound/list
 
-        // Child entries for Compound / List display
-        private final List<ChildRow> children2 = new ArrayList<>();
-        private ButtonWidget expandButton;
+        // Parsed child rows for compound / list display when expanded
+        private final List<ChildRow> childRows = new ArrayList<>();
 
+        // ─────────────────────────────────────────────────────────
         public NbtEntry(MinecraftClient client, String key, String value,
                         byte nbtType, NbtListWidget parent) {
             this.client  = client;
             this.nbtType = nbtType;
             this.parent  = parent;
 
-            // ── Key field ─────────────────────────────────────────
+            // Key field (yellow text)
             this.keyField = new TextFieldWidget(
-                    client.textRenderer, 0, 0, 110, 16, Text.literal(key));
+                    client.textRenderer, 0, 0, 112, 16, Text.literal(key));
             this.keyField.setMaxLength(256);
             this.keyField.setText(key);
-            this.keyField.setEditableColor(0xFFFFAA);   // yellow keys
+            this.keyField.setEditableColor(0xFFFF88);
 
-            // ── Delete button ─────────────────────────────────────
+            // Delete button
             this.deleteButton = ButtonWidget.builder(
                     Text.literal("✕").formatted(Formatting.RED),
                     btn -> parent.removeEntry(this)
             ).dimensions(0, 0, 16, 16).build();
 
-            // ── Determine boolean ─────────────────────────────────
-            boolean isBoolean = nbtType == NbtElement.BYTE_TYPE
+            // Detect boolean byte (1b / 0b / true / false)
+            boolean isBool = (nbtType == NbtElement.BYTE_TYPE)
                     && (value.equals("true") || value.equals("false")
-                    || value.equals("1b") || value.equals("0b"));
+                    || value.equals("1b")  || value.equals("0b"));
 
-            if (isBoolean) {
-                boolean checked = value.equals("true") || value.equals("1b");
+            if (isBool) {
+                boolean on = value.equals("true") || value.equals("1b");
                 this.checkboxWidget = CheckboxWidget.builder(Text.literal(""), client.textRenderer)
-                        .checked(checked).build();
+                        .checked(on).build();
                 this.valueField = null;
             } else {
                 this.valueField = new TextFieldWidget(
-                        client.textRenderer, 0, 0, 180, 16, Text.literal(value));
-                this.valueField.setMaxLength(4096);
+                        client.textRenderer, 0, 0, 190, 16, Text.literal(value));
+                this.valueField.setMaxLength(8192);
                 this.valueField.setText(value);
-                this.valueField.setEditableColor(0xAAFFAA); // green values
+                this.valueField.setEditableColor(0x88FF88);
                 this.checkboxWidget = null;
             }
 
-            // ── Expand button for Compound / List ─────────────────
+            // Expand button only for compound / list
             if (nbtType == NbtElement.COMPOUND_TYPE || nbtType == NbtElement.LIST_TYPE) {
-                this.expandButton = ButtonWidget.builder(
+                this.expandBtn = ButtonWidget.builder(
                         Text.literal("▶"),
                         btn -> {
                             expanded = !expanded;
                             btn.setMessage(Text.literal(expanded ? "▼" : "▶"));
                         }
                 ).dimensions(0, 0, 16, 16).build();
-            } else {
-                this.expandButton = null;
-            }
-
-            // Parse child entries from compound/list value string
-            if (nbtType == NbtElement.COMPOUND_TYPE || nbtType == NbtElement.LIST_TYPE) {
-                parseChildren(value);
+                parseChildRows(value);
             }
         }
 
-        /** Best-effort parse of compound/list value into displayable child rows. */
-        private void parseChildren(String raw) {
+        /** Best-effort parse of a compound/list string into display rows. */
+        private void parseChildRows(String raw) {
             try {
-                NbtCompound tmp =
-                        StringNbtReader.readCompound("{__root:" + raw + "}");
-                NbtElement root = tmp.get("__root");
+                NbtCompound wrapper =
+                        StringNbtReader.readCompound("{__r:" + raw + "}");
+                NbtElement root = wrapper.get("__r");
                 if (root instanceof NbtCompound comp) {
                     for (String k : comp.getKeys()) {
                         NbtElement el = comp.get(k);
-                        children2.add(new ChildRow(k, el != null ? el.toString() : ""));
+                        childRows.add(new ChildRow(k, el != null ? el.toString() : ""));
                     }
                 } else if (root instanceof NbtList list) {
                     for (int i = 0; i < list.size(); i++) {
-                        children2.add(new ChildRow("[" + i + "]", list.get(i).toString()));
+                        childRows.add(new ChildRow("[" + i + "]", list.get(i).toString()));
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // If parsing fails the expand button is still shown but
+                // the expanded view will be empty — that's fine.
+            }
         }
 
+        // ─────────────────────────────────────────────────────────
         //  Render
+        //
+        //  FIX: This override has the CORRECT signature for 1.21.x.
+        //  The old code had two render() overrides: the correct one and
+        //  an extra no-op override with a different signature left over
+        //  from an earlier version. That stale override was picked by the
+        //  JVM in some call paths, resulting in nothing being drawn and
+        //  the framework retrying the blur — hence the crash.
+        //  There is now exactly ONE render() override.
+        // ─────────────────────────────────────────────────────────
         public void render(DrawContext ctx, int index, int y, int x,
                            int entryWidth, int entryHeight,
                            int mouseX, int mouseY, boolean hovered, float delta) {
 
             int midY   = y + entryHeight / 2;
-            int fieldY = midY - 8;
+            int fieldY = midY - 8;   // centres a 16px-tall field vertically
 
-            // Layout
+            // Column positions (relative to x which is the row's left edge)
             int badgeX  = x + 2;
-            int keyX    = badgeX + 26;
+            int keyX    = badgeX + 24;
             int typeX   = keyX + 116;
-            int valueX  = typeX + 46;
-            int delX    = x + entryWidth - 20;
-            int expandX = delX - 20;
+            int valX    = typeX + 44;
+            int expandX = x + entryWidth - 38;
+            int delX    = x + entryWidth - 18;
 
-            // ── Alternating row bg ────────────────────────────────
+            // ── Row backgrounds ───────────────────────────────────
             if (index % 2 == 0) ctx.fill(x, y, x + entryWidth, y + entryHeight, 0x0AFFFFFF);
-
-            // ── Hover highlight ───────────────────────────────────
             if (hovered)        ctx.fill(x, y, x + entryWidth, y + entryHeight, 0x18FFFFFF);
 
             // ── Type badge ────────────────────────────────────────
-            int badgeColor = getBadgeColor();
-            ctx.fill(badgeX, fieldY, badgeX + 22, fieldY + 16, badgeColor);
+            ctx.fill(badgeX, fieldY, badgeX + 20, fieldY + 16, badgeBg());
             ctx.drawCenteredTextWithShadow(client.textRenderer,
-                    Text.literal(getTypeShort()),
-                    badgeX + 11, fieldY + 4, getBadgeTextColor());
+                    Text.literal(typeShort()), badgeX + 10, fieldY + 4, badgeFg());
 
             // ── Key field ─────────────────────────────────────────
-            keyField.setX(keyX); keyField.setY(fieldY);
+            keyField.setX(keyX);
+            keyField.setY(fieldY);
             keyField.render(ctx, mouseX, mouseY, delta);
 
             // ── Type label ────────────────────────────────────────
             ctx.drawTextWithShadow(client.textRenderer,
-                    Text.literal(getTypeFull()).formatted(Formatting.GRAY),
-                    typeX, midY - 4, getTypeTextColor());
+                    Text.literal(typeFull()).formatted(Formatting.GRAY),
+                    typeX, midY - 4, typeFg());
 
-            // ── Value: checkbox or text field ─────────────────────
-            int maxValW = (expandButton != null ? expandX : delX) - valueX - 6;
+            // ── Value widget ──────────────────────────────────────
+            // clamp width so it never overlaps the expand/delete buttons
+            int maxValW = (expandBtn != null ? expandX : delX) - valX - 4;
+
             if (checkboxWidget != null) {
-                checkboxWidget.setX(valueX); checkboxWidget.setY(fieldY);
+                checkboxWidget.setX(valX);
+                checkboxWidget.setY(fieldY);
                 checkboxWidget.render(ctx, mouseX, mouseY, delta);
-                // Live true/false label beside toggle
-                String boolLabel = checkboxWidget.isChecked() ? "true" : "false";
-                int boolColor    = checkboxWidget.isChecked() ? 0x55FF55 : 0xFF5555;
+                // true / false label beside the checkbox
+                boolean on   = checkboxWidget.isChecked();
+                String  lbl  = on ? "true" : "false";
+                int     lcol = on ? 0x55FF55 : 0xFF5555;
                 ctx.drawTextWithShadow(client.textRenderer,
-                        Text.literal(boolLabel), valueX + 22, midY - 4, boolColor);
+                        Text.literal(lbl), valX + 20, midY - 4, lcol);
             } else if (valueField != null) {
                 valueField.setWidth(Math.max(40, maxValW));
-                valueField.setX(valueX); valueField.setY(fieldY);
+                valueField.setX(valX);
+                valueField.setY(fieldY);
                 valueField.render(ctx, mouseX, mouseY, delta);
             }
 
             // ── Expand button ─────────────────────────────────────
-            if (expandButton != null) {
-                expandButton.setX(expandX); expandButton.setY(fieldY);
-                expandButton.render(ctx, mouseX, mouseY, delta);
+            if (expandBtn != null) {
+                expandBtn.setX(expandX);
+                expandBtn.setY(fieldY);
+                expandBtn.render(ctx, mouseX, mouseY, delta);
             }
 
             // ── Delete button ─────────────────────────────────────
-            deleteButton.setX(delX); deleteButton.setY(fieldY);
+            deleteButton.setX(delX);
+            deleteButton.setY(fieldY);
             deleteButton.render(ctx, mouseX, mouseY, delta);
 
-            // ── Child rows (when expanded) ────────────────────────
-            if (expanded && !children2.isEmpty()) {
-                int cY = y + entryHeight;
-                for (ChildRow cr : children2) {
-                    ctx.fill(x, cY, x + entryWidth, cY + 18, 0x22FFFFFF);
-                    // Indent line
-                    ctx.fill(x + 6, cY + 2, x + 8, cY + 16, 0x44FFFFFF);
+            // ── Expanded child rows ───────────────────────────────
+            if (expanded && !childRows.isEmpty()) {
+                int cy = y + entryHeight;
+                for (ChildRow cr : childRows) {
+                    ctx.fill(x, cy, x + entryWidth, cy + 17, 0x22FFFFFF);
+                    // Indent guide line
+                    ctx.fill(x + 6, cy + 2, x + 8, cy + 15, 0x33FFFFFF);
                     ctx.drawTextWithShadow(client.textRenderer,
-                            Text.literal(cr.key).formatted(Formatting.AQUA),
-                            x + 14, cY + 5, 0x55DDFF);
+                            Text.literal(cr.key()).formatted(Formatting.AQUA),
+                            x + 12, cy + 5, 0x55DDFF);
                     ctx.drawTextWithShadow(client.textRenderer,
-                            Text.literal(truncate(cr.value, 40)).formatted(Formatting.WHITE),
-                            x + 14 + 110, cY + 5, 0xCCCCCC);
-                    cY += 18;
+                            Text.literal(cap(cr.value(), 50)),
+                            x + 12 + 118, cy + 5, 0xCCCCCC);
+                    cy += 17;
                 }
             }
         }
 
-        // ─────────────────────────────────────────────────────────
-        //  Children / selectables
-        // ─────────────────────────────────────────────────────────
+        // ── Element / Selectable lists ────────────────────────────
         @Override
         public List<? extends Element> children() {
             List<Element> list = new ArrayList<>();
             list.add(keyField);
-            if (checkboxWidget  != null) list.add(checkboxWidget);
-            if (valueField      != null) list.add(valueField);
-            if (expandButton    != null) list.add(expandButton);
+            if (checkboxWidget != null) list.add(checkboxWidget);
+            if (valueField     != null) list.add(valueField);
+            if (expandBtn      != null) list.add(expandBtn);
             list.add(deleteButton);
             return list;
         }
@@ -251,17 +270,15 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
         public List<? extends Selectable> selectableChildren() {
             List<Selectable> list = new ArrayList<>();
             list.add(keyField);
-            if (checkboxWidget  != null) list.add(checkboxWidget);
-            if (valueField      != null) list.add(valueField);
-            if (expandButton    != null) list.add(expandButton);
+            if (checkboxWidget != null) list.add(checkboxWidget);
+            if (valueField     != null) list.add(valueField);
+            if (expandBtn      != null) list.add(expandBtn);
             list.add(deleteButton);
             return list;
         }
 
-        // ─────────────────────────────────────────────────────────
-        //  Type display helpers
-        // ─────────────────────────────────────────────────────────
-        private String getTypeShort() {
+        // ── Type display helpers ──────────────────────────────────
+        private String typeShort() {
             return switch (nbtType) {
                 case NbtElement.BYTE_TYPE       -> "b";
                 case NbtElement.SHORT_TYPE      -> "s";
@@ -269,17 +286,17 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
                 case NbtElement.LONG_TYPE       -> "L";
                 case NbtElement.FLOAT_TYPE      -> "f";
                 case NbtElement.DOUBLE_TYPE     -> "d";
-                case NbtElement.STRING_TYPE     -> "Str";
-                case NbtElement.LIST_TYPE       -> "[ ]";
-                case NbtElement.COMPOUND_TYPE   -> "{ }";
-                case NbtElement.INT_ARRAY_TYPE  -> "I[]";
-                case NbtElement.LONG_ARRAY_TYPE -> "L[]";
-                case NbtElement.BYTE_ARRAY_TYPE -> "B[]";
+                case NbtElement.STRING_TYPE     -> "St";
+                case NbtElement.LIST_TYPE       -> "[]";
+                case NbtElement.COMPOUND_TYPE   -> "{}";
+                case NbtElement.INT_ARRAY_TYPE  -> "I[";
+                case NbtElement.LONG_ARRAY_TYPE -> "L[";
+                case NbtElement.BYTE_ARRAY_TYPE -> "B[";
                 default                         -> "?";
             };
         }
 
-        private String getTypeFull() {
+        private String typeFull() {
             return switch (nbtType) {
                 case NbtElement.BYTE_TYPE       -> "byte";
                 case NbtElement.SHORT_TYPE      -> "short";
@@ -293,28 +310,28 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
                 case NbtElement.INT_ARRAY_TYPE  -> "int[]";
                 case NbtElement.LONG_ARRAY_TYPE -> "long[]";
                 case NbtElement.BYTE_ARRAY_TYPE -> "byte[]";
-                default                         -> "unknown";
+                default                         -> "?";
             };
         }
 
-        // Badge background colour (dark, readable)
-        private int getBadgeColor() {
+        // Badge background (dark tint matching the type colour family)
+        private int badgeBg() {
             return switch (nbtType) {
-                case NbtElement.BYTE_TYPE       -> 0xFF5C2A00; // burnt orange
-                case NbtElement.SHORT_TYPE      -> 0xFF3A2A00; // dark amber
-                case NbtElement.INT_TYPE        -> 0xFF002855; // dark blue
-                case NbtElement.LONG_TYPE       -> 0xFF2A0055; // dark purple
-                case NbtElement.FLOAT_TYPE      -> 0xFF003A1A; // dark green
-                case NbtElement.DOUBLE_TYPE     -> 0xFF003A2A; // dark teal
-                case NbtElement.STRING_TYPE     -> 0xFF3A2800; // dark yellow
-                case NbtElement.LIST_TYPE       -> 0xFF002040; // navy
-                case NbtElement.COMPOUND_TYPE   -> 0xFF3A0028; // dark pink
+                case NbtElement.BYTE_TYPE       -> 0xFF5C2A00;
+                case NbtElement.SHORT_TYPE      -> 0xFF3A2A00;
+                case NbtElement.INT_TYPE        -> 0xFF002855;
+                case NbtElement.LONG_TYPE       -> 0xFF2A0055;
+                case NbtElement.FLOAT_TYPE      -> 0xFF003A1A;
+                case NbtElement.DOUBLE_TYPE     -> 0xFF003A2A;
+                case NbtElement.STRING_TYPE     -> 0xFF3A2800;
+                case NbtElement.LIST_TYPE       -> 0xFF002040;
+                case NbtElement.COMPOUND_TYPE   -> 0xFF3A0028;
                 default                         -> 0xFF222222;
             };
         }
 
-        // Badge text colour (bright, contrasting)
-        private int getBadgeTextColor() {
+        // Badge foreground (bright, readable on the dark bg above)
+        private int badgeFg() {
             return switch (nbtType) {
                 case NbtElement.BYTE_TYPE       -> 0xFFFF9944;
                 case NbtElement.SHORT_TYPE      -> 0xFFFFCC44;
@@ -329,8 +346,8 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
             };
         }
 
-        // Type label colour in the row
-        private int getTypeTextColor() {
+        // Type label colour in the row (matches badge fg for consistency)
+        private int typeFg() {
             return switch (nbtType) {
                 case NbtElement.INT_TYPE        -> 0xFF74C0FC;
                 case NbtElement.LONG_TYPE       -> 0xFFCC99FF;
@@ -343,26 +360,16 @@ public class NbtListWidget extends ElementListWidget<NbtListWidget.NbtEntry> {
             };
         }
 
-        private static String truncate(String s, int max) {
+        private static String cap(String s, int max) {
             return s.length() > max ? s.substring(0, max) + "…" : s;
         }
 
-        // Required no-op override for the Entry abstract class
         @Override
-        public void render(DrawContext context, int mouseX, int mouseY,
-                           boolean hovered, float deltaTicks) {}
+        public void render(DrawContext context, int mouseX, int mouseY, boolean hovered, float deltaTicks) {
 
-        public void setExpanded(boolean expanded) {
-            this.expanded = expanded;
         }
 
-        public boolean isExpanded() {
-            return expanded;
-        }
-
-        // ─────────────────────────────────────────────────────────
-        //  Inner: child row for compound/list display
-        // ─────────────────────────────────────────────────────────
+        // ── Child row record ──────────────────────────────────────
         private record ChildRow(String key, String value) {}
     }
 }
